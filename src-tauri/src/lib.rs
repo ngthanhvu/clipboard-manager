@@ -12,10 +12,12 @@ use arboard::{Clipboard, ImageData};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
 
 const HISTORY_LIMIT: usize = 100;
 const HISTORY_EVENT: &str = "clipboard-history-updated";
+const MANAGER_SHOWN_EVENT: &str = "manager-shown";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -271,10 +273,35 @@ fn clear_unpinned(state: State<'_, ClipboardState>) -> Result<Vec<Clip>, String>
     update_history(&state, |history| history.retain(|clip| clip.pinned))
 }
 
+#[tauri::command]
+fn hide_window(window: WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            ShortcutBuilder::new()
+                .with_shortcut("Ctrl+Shift+V")
+                .expect("invalid manager shortcut")
+                .with_handler(|app, _, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if let Some(window) = app.get_webview_window("main") {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit(MANAGER_SHOWN_EVENT, ());
+                        }
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let storage_path = app.path().app_data_dir()?.join("clipboard-history.json");
             let history = Arc::new(Mutex::new(load_history(&storage_path)));
@@ -290,8 +317,15 @@ pub fn run() {
             copy_clip,
             toggle_pin,
             delete_clip,
-            clear_unpinned
+            clear_unpinned,
+            hide_window
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

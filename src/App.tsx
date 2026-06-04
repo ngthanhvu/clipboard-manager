@@ -77,13 +77,22 @@ function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
     invoke<Clip[]>("get_history").then(setClips).catch(console.error);
-    const unlisten = listen<Clip[]>("clipboard-history-updated", (event) => {
+    const unlistenHistory = listen<Clip[]>("clipboard-history-updated", (event) => {
       setClips(event.payload);
     });
-    return () => void unlisten.then((dispose) => dispose());
+    const unlistenShown = listen("manager-shown", () => {
+      setFilter("all");
+      setQuery("");
+      setSelectedIndex(0);
+    });
+    return () => {
+      void unlistenHistory.then((dispose) => dispose());
+      void unlistenShown.then((dispose) => dispose());
+    };
   }, []);
 
   const filteredClips = useMemo(
@@ -114,13 +123,58 @@ function App() {
     setClips(await invoke<Clip[]>("delete_clip", { id }));
   };
 
+  useEffect(() => {
+    setSelectedIndex((index) =>
+      Math.min(index, Math.max(0, filteredClips.length - 1)),
+    );
+  }, [filteredClips.length]);
+
+  useEffect(() => {
+    document
+      .querySelector(".clip-row.selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  useEffect(() => {
+    const onKeyDown = async (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        await invoke("hide_window");
+        return;
+      }
+      if (event.target instanceof HTMLInputElement) return;
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setSelectedIndex((index) =>
+          Math.min(
+            Math.max(index + direction, 0),
+            Math.max(filteredClips.length - 1, 0),
+          ),
+        );
+        return;
+      }
+
+      const clip =
+        event.key === "Enter" ? filteredClips[selectedIndex] : undefined;
+      if (clip) {
+        event.preventDefault();
+        await copyClip(clip);
+        await invoke("hide_window");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filteredClips, selectedIndex]);
+
   return (
     <FluentProvider theme={darkMode ? webDarkTheme : webLightTheme}>
       <main className="app">
         <header className="header">
           <div>
             <h1>Clipboard</h1>
-            <span>{clips.length} mục đã lưu</span>
+            <span>Ctrl+Shift+V · ↑↓ chọn · Enter copy</span>
           </div>
           <div className="header-actions">
             <Tooltip content="Xóa mục chưa ghim" relationship="label">
@@ -178,10 +232,11 @@ function App() {
         </section>
 
         <section className="history">
-          {filteredClips.map((clip) => (
+          {filteredClips.map((clip, index) => (
             <article
-              className="clip-row"
+              className={`clip-row ${selectedIndex === index ? "selected" : ""}`}
               key={clip.id}
+              onClick={() => setSelectedIndex(index)}
               onDoubleClick={() => copyClip(clip)}
             >
               {clip.image ? (

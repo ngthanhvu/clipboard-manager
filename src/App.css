@@ -103,12 +103,32 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-color: var(--colorNeutralStroke1) transparent;
+  scrollbar-width: thin;
   background: var(--colorNeutralBackground1);
 }
 
+.history::-webkit-scrollbar {
+  width: 2px;
+}
+
+.history::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--colorNeutralStroke1);
+}
+
+.history::-webkit-scrollbar-thumb:hover {
+  background: var(--colorNeutralStroke1Hover);
+}
+
 .clip-row {
+  position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: 50px;
@@ -119,6 +139,11 @@ button {
 
 .clip-row:hover {
   background: var(--colorNeutralBackground1Hover);
+}
+
+.clip-row.selected {
+  background: var(--colorNeutralBackground1Selected);
+  box-shadow: inset 3px 0 var(--colorBrandBackground);
 }
 
 .type-icon,
@@ -181,6 +206,10 @@ button {
 }
 
 .row-actions {
+  position: absolute;
+  right: 4px;
+  padding-left: 8px;
+  background: linear-gradient(90deg, transparent, var(--colorNeutralBackground1) 14%);
   opacity: 0;
 }
 
