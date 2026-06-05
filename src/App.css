@@ -241,3 +241,35 @@ button {
   margin-top: 3px;
   font-size: 11px;
 }
+
+.settings {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  flex: 1;
+  padding: 18px 14px;
+  border-top: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+}
+
+.settings h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.settings p {
+  margin: 0;
+  color: var(--colorNeutralForeground3);
+  font-size: 11px;
+}
+
+.settings-error {
+  color: var(--colorPaletteRedForeground1);
+  font-size: 11px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}

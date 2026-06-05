@@ -20,6 +20,7 @@ import {
   PinFilled,
   PinRegular,
   SearchRegular,
+  SettingsRegular,
   WeatherMoonRegular,
   WeatherSunnyRegular,
 } from "@fluentui/react-icons";
@@ -78,20 +79,31 @@ function App() {
   const [filter, setFilter] = useState<Filter>("all");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcut, setShortcut] = useState("Ctrl+Shift+V");
+  const [shortcutError, setShortcutError] = useState("");
 
   useEffect(() => {
     invoke<Clip[]>("get_history").then(setClips).catch(console.error);
+    invoke<string>("get_shortcut").then(setShortcut).catch(console.error);
     const unlistenHistory = listen<Clip[]>("clipboard-history-updated", (event) => {
       setClips(event.payload);
     });
     const unlistenShown = listen("manager-shown", () => {
+      setSettingsOpen(false);
       setFilter("all");
       setQuery("");
       setSelectedIndex(0);
     });
+    const unlistenSettings = listen("settings-opened", () => {
+      setSettingsOpen(true);
+      setShortcutError("");
+      void invoke<string>("get_shortcut").then(setShortcut);
+    });
     return () => {
       void unlistenHistory.then((dispose) => dispose());
       void unlistenShown.then((dispose) => dispose());
+      void unlistenSettings.then((dispose) => dispose());
     };
   }, []);
 
@@ -138,9 +150,16 @@ function App() {
   useEffect(() => {
     const onKeyDown = async (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (settingsOpen) {
+          setShortcut(await invoke<string>("get_shortcut"));
+          setSettingsOpen(false);
+          setShortcutError("");
+          return;
+        }
         await invoke("hide_window");
         return;
       }
+      if (settingsOpen) return;
       if (event.target instanceof HTMLInputElement) return;
 
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -166,7 +185,36 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filteredClips, selectedIndex]);
+  }, [filteredClips, selectedIndex, settingsOpen]);
+
+  const captureShortcut = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+    const parts = [
+      event.ctrlKey && "Ctrl",
+      event.altKey && "Alt",
+      event.shiftKey && "Shift",
+      event.metaKey && "Super",
+      event.key.length === 1 ? event.key.toUpperCase() : event.key,
+    ].filter(Boolean);
+    setShortcut(parts.join("+"));
+    setShortcutError("");
+  };
+
+  const saveShortcut = async () => {
+    try {
+      await invoke("set_shortcut", { shortcut });
+      setSettingsOpen(false);
+    } catch (error) {
+      setShortcutError(String(error));
+    }
+  };
+
+  const closeSettings = async () => {
+    setShortcut(await invoke<string>("get_shortcut"));
+    setSettingsOpen(false);
+    setShortcutError("");
+  };
 
   return (
     <FluentProvider theme={darkMode ? webDarkTheme : webLightTheme}>
@@ -174,7 +222,7 @@ function App() {
         <header className="header">
           <div>
             <h1>Clipboard</h1>
-            <span>Ctrl+Shift+V · ↑↓ chọn · Enter copy</span>
+            <span>{shortcut} · ↑↓ chọn · Enter copy</span>
           </div>
           <div className="header-actions">
             <Tooltip content="Xóa mục chưa ghim" relationship="label">
@@ -195,10 +243,47 @@ function App() {
                 onClick={() => setDarkMode((value) => !value)}
               />
             </Tooltip>
+            <Tooltip content="Cài đặt phím tắt" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<SettingsRegular />}
+                onClick={() => {
+                  setSettingsOpen(true);
+                  setShortcutError("");
+                  void invoke<string>("get_shortcut").then(setShortcut);
+                }}
+              />
+            </Tooltip>
           </div>
         </header>
 
-        <section className="controls">
+        {settingsOpen ? (
+          <section className="settings">
+            <div>
+              <h2>Phím tắt mở Clipboard</h2>
+              <p>Nhấn tổ hợp phím mới vào ô bên dưới.</p>
+            </div>
+            <Input
+              value={shortcut}
+              readOnly
+              autoFocus
+              onKeyDown={captureShortcut}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            {shortcutError && <span className="settings-error">{shortcutError}</span>}
+            <div className="settings-actions">
+              <Button appearance="subtle" onClick={closeSettings}>
+                Hủy
+              </Button>
+              <Button appearance="primary" onClick={saveShortcut}>
+                Lưu phím tắt
+              </Button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="controls">
           <Input
             className="search"
             size="medium"
@@ -229,9 +314,9 @@ function App() {
               </button>
             ))}
           </div>
-        </section>
+            </section>
 
-        <section className="history">
+            <section className="history">
           {filteredClips.map((clip, index) => (
             <article
               className={`clip-row ${selectedIndex === index ? "selected" : ""}`}
@@ -287,7 +372,9 @@ function App() {
               <span>Hãy sao chép văn bản hoặc hình ảnh.</span>
             </div>
           )}
-        </section>
+            </section>
+          </>
+        )}
       </main>
     </FluentProvider>
   );

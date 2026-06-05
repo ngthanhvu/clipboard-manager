@@ -12,12 +12,18 @@ use arboard::{Clipboard, ImageData};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
-use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, State, WebviewWindow,
+};
+use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, GlobalShortcutExt, ShortcutState};
 
 const HISTORY_LIMIT: usize = 100;
 const HISTORY_EVENT: &str = "clipboard-history-updated";
 const MANAGER_SHOWN_EVENT: &str = "manager-shown";
+const SETTINGS_OPENED_EVENT: &str = "settings-opened";
+const DEFAULT_SHORTCUT: &str = "Ctrl+Shift+V";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +40,16 @@ struct Clip {
 struct ClipboardState {
     history: Arc<Mutex<Vec<Clip>>>,
     storage_path: PathBuf,
+}
+
+struct SettingsState {
+    shortcut: Mutex<String>,
+    storage_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AppSettings {
+    shortcut: String,
 }
 
 fn timestamp_ms() -> u64 {
@@ -74,6 +90,30 @@ fn load_history(path: &Path) -> Vec<Clip> {
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
+}
+
+fn load_settings(path: &Path) -> AppSettings {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(|| AppSettings {
+            shortcut: DEFAULT_SHORTCUT.into(),
+        })
+}
+
+fn show_manager(app: &AppHandle, open_settings: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit(
+            if open_settings {
+                SETTINGS_OPENED_EVENT
+            } else {
+                MANAGER_SHOWN_EVENT
+            },
+            (),
+        );
+    }
 }
 
 fn trim_history(history: &mut Vec<Clip>) {
@@ -278,14 +318,60 @@ fn hide_window(window: WebviewWindow) -> Result<(), String> {
     window.hide().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn get_shortcut(state: State<'_, SettingsState>) -> String {
+    state
+        .shortcut
+        .lock()
+        .expect("settings lock poisoned")
+        .clone()
+}
+
+#[tauri::command]
+fn set_shortcut(
+    shortcut: String,
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+) -> Result<(), String> {
+    let shortcut = shortcut.trim().to_string();
+    if shortcut.is_empty() {
+        return Err("Phím tắt không được để trống".into());
+    }
+    if !shortcut.contains('+') {
+        return Err("Phím tắt phải gồm ít nhất một phím bổ trợ".into());
+    }
+
+    let mut current = state.shortcut.lock().map_err(|error| error.to_string())?;
+    if *current == shortcut {
+        return Ok(());
+    }
+
+    app.global_shortcut()
+        .register(shortcut.as_str())
+        .map_err(|error| format!("Không thể đăng ký phím tắt: {error}"))?;
+    let _ = app.global_shortcut().unregister(current.as_str());
+
+    let settings = AppSettings {
+        shortcut: shortcut.clone(),
+    };
+    if let Some(parent) = state.storage_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(
+        &state.storage_path,
+        serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    *current = shortcut;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(
             ShortcutBuilder::new()
-                .with_shortcut("Ctrl+Shift+V")
-                .expect("invalid manager shortcut")
                 .with_handler(|app, _, event| {
                     if event.state() != ShortcutState::Pressed {
                         return;
@@ -294,22 +380,73 @@ pub fn run() {
                         if window.is_visible().unwrap_or(false) {
                             let _ = window.hide();
                         } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.emit(MANAGER_SHOWN_EVENT, ());
+                            show_manager(app, false);
                         }
                     }
                 })
                 .build(),
         )
         .setup(|app| {
-            let storage_path = app.path().app_data_dir()?.join("clipboard-history.json");
+            let app_data = app.path().app_data_dir()?;
+            let storage_path = app_data.join("clipboard-history.json");
             let history = Arc::new(Mutex::new(load_history(&storage_path)));
             app.manage(ClipboardState {
                 history: history.clone(),
                 storage_path: storage_path.clone(),
             });
             start_clipboard_watcher(app.handle().clone(), history, storage_path);
+
+            let settings_path = app_data.join("settings.json");
+            let settings = load_settings(&settings_path);
+            let shortcut = if app
+                .global_shortcut()
+                .register(settings.shortcut.as_str())
+                .is_ok()
+            {
+                settings.shortcut
+            } else {
+                app.global_shortcut().register(DEFAULT_SHORTCUT)?;
+                DEFAULT_SHORTCUT.into()
+            };
+            app.manage(SettingsState {
+                shortcut: Mutex::new(shortcut),
+                storage_path: settings_path,
+            });
+
+            let menu = MenuBuilder::new(app)
+                .text("show", "Mở Clipboard")
+                .text("settings", "Cài đặt phím tắt")
+                .separator()
+                .text("quit", "Thoát")
+                .build()?;
+            TrayIconBuilder::new()
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .expect("application icon missing"),
+                )
+                .tooltip("Clipboard Manager")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => show_manager(app, false),
+                    "settings" => show_manager(app, true),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if matches!(
+                        event,
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        }
+                    ) {
+                        show_manager(tray.app_handle(), false);
+                    }
+                })
+                .build(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -318,7 +455,9 @@ pub fn run() {
             toggle_pin,
             delete_clip,
             clear_unpinned,
-            hide_window
+            hide_window,
+            get_shortcut,
+            set_shortcut
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
