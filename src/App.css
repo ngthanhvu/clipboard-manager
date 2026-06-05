@@ -273,3 +273,37 @@ button {
   justify-content: flex-end;
   gap: 6px;
 }
+
+.settings-dialog-actions {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  gap: 6px;
+  justify-self: end;
+  margin-left: auto;
+}
+
+.settings-dialog-actions > button {
+  flex: 0 0 auto;
+  min-width: 82px;
+}
+
+.settings-dialog {
+  width: calc(100vw - 28px);
+  max-width: 360px;
+}
+
+.settings-content {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-field label {
+  font-size: 12px;
+  font-weight: 600;
+}

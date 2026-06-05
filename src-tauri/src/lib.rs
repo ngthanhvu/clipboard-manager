@@ -17,6 +17,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WebviewWindow,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, GlobalShortcutExt, ShortcutState};
 
 const HISTORY_LIMIT: usize = 100;
@@ -319,6 +320,24 @@ fn hide_window(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable().map_err(|error| error.to_string())?;
+    } else {
+        autostart.disable().map_err(|error| error.to_string())?;
+    }
+    autostart.is_enabled().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_shortcut(state: State<'_, SettingsState>) -> String {
     state
         .shortcut
@@ -370,6 +389,10 @@ fn set_shortcut(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             ShortcutBuilder::new()
                 .with_handler(|app, _, event| {
@@ -456,6 +479,8 @@ pub fn run() {
             delete_clip,
             clear_unpinned,
             hide_window,
+            get_autostart_enabled,
+            set_autostart_enabled,
             get_shortcut,
             set_shortcut
         ])

@@ -3,8 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   FluentProvider,
   Input,
+  Switch,
   Tooltip,
   webDarkTheme,
   webLightTheme,
@@ -82,10 +88,18 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcut, setShortcut] = useState("Ctrl+Shift+V");
   const [shortcutError, setShortcutError] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+
+  const refreshSettings = async () => {
+    setShortcut(await invoke<string>("get_shortcut"));
+    setAutostartEnabled(await invoke<boolean>("get_autostart_enabled"));
+  };
 
   useEffect(() => {
     invoke<Clip[]>("get_history").then(setClips).catch(console.error);
-    invoke<string>("get_shortcut").then(setShortcut).catch(console.error);
+    refreshSettings().catch(console.error);
+
     const unlistenHistory = listen<Clip[]>("clipboard-history-updated", (event) => {
       setClips(event.payload);
     });
@@ -98,8 +112,10 @@ function App() {
     const unlistenSettings = listen("settings-opened", () => {
       setSettingsOpen(true);
       setShortcutError("");
-      void invoke<string>("get_shortcut").then(setShortcut);
+      setSettingsError("");
+      refreshSettings().catch(console.error);
     });
+
     return () => {
       void unlistenHistory.then((dispose) => dispose());
       void unlistenShown.then((dispose) => dispose());
@@ -151,9 +167,7 @@ function App() {
     const onKeyDown = async (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (settingsOpen) {
-          setShortcut(await invoke<string>("get_shortcut"));
-          setSettingsOpen(false);
-          setShortcutError("");
+          await closeSettings();
           return;
         }
         await invoke("hide_window");
@@ -187,6 +201,20 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [filteredClips, selectedIndex, settingsOpen]);
 
+  const openSettings = () => {
+    setSettingsOpen(true);
+    setShortcutError("");
+    setSettingsError("");
+    refreshSettings().catch(console.error);
+  };
+
+  const closeSettings = async () => {
+    await refreshSettings();
+    setSettingsOpen(false);
+    setShortcutError("");
+    setSettingsError("");
+  };
+
   const captureShortcut = (event: React.KeyboardEvent<HTMLInputElement>) => {
     event.preventDefault();
     if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
@@ -204,16 +232,25 @@ function App() {
   const saveShortcut = async () => {
     try {
       await invoke("set_shortcut", { shortcut });
+      setShortcutError("");
       setSettingsOpen(false);
     } catch (error) {
       setShortcutError(String(error));
     }
   };
 
-  const closeSettings = async () => {
-    setShortcut(await invoke<string>("get_shortcut"));
-    setSettingsOpen(false);
-    setShortcutError("");
+  const updateAutostart = async (enabled: boolean) => {
+    const previous = autostartEnabled;
+    setAutostartEnabled(enabled);
+    setSettingsError("");
+    try {
+      setAutostartEnabled(
+        await invoke<boolean>("set_autostart_enabled", { enabled }),
+      );
+    } catch (error) {
+      setAutostartEnabled(previous);
+      setSettingsError(String(error));
+    }
   };
 
   return (
@@ -243,47 +280,18 @@ function App() {
                 onClick={() => setDarkMode((value) => !value)}
               />
             </Tooltip>
-            <Tooltip content="Cài đặt phím tắt" relationship="label">
+            <Tooltip content="Cài đặt" relationship="label">
               <Button
                 appearance="subtle"
                 size="small"
                 icon={<SettingsRegular />}
-                onClick={() => {
-                  setSettingsOpen(true);
-                  setShortcutError("");
-                  void invoke<string>("get_shortcut").then(setShortcut);
-                }}
+                onClick={openSettings}
               />
             </Tooltip>
           </div>
         </header>
 
-        {settingsOpen ? (
-          <section className="settings">
-            <div>
-              <h2>Phím tắt mở Clipboard</h2>
-              <p>Nhấn tổ hợp phím mới vào ô bên dưới.</p>
-            </div>
-            <Input
-              value={shortcut}
-              readOnly
-              autoFocus
-              onKeyDown={captureShortcut}
-              onFocus={(event) => event.currentTarget.select()}
-            />
-            {shortcutError && <span className="settings-error">{shortcutError}</span>}
-            <div className="settings-actions">
-              <Button appearance="subtle" onClick={closeSettings}>
-                Hủy
-              </Button>
-              <Button appearance="primary" onClick={saveShortcut}>
-                Lưu phím tắt
-              </Button>
-            </div>
-          </section>
-        ) : (
-          <>
-            <section className="controls">
+        <section className="controls">
           <Input
             className="search"
             size="medium"
@@ -314,9 +322,9 @@ function App() {
               </button>
             ))}
           </div>
-            </section>
+        </section>
 
-            <section className="history">
+        <section className="history">
           {filteredClips.map((clip, index) => (
             <article
               className={`clip-row ${selectedIndex === index ? "selected" : ""}`}
@@ -372,9 +380,53 @@ function App() {
               <span>Hãy sao chép văn bản hoặc hình ảnh.</span>
             </div>
           )}
-            </section>
-          </>
-        )}
+        </section>
+
+        <Dialog
+          open={settingsOpen}
+          onOpenChange={(_, data) => {
+            if (!data.open) void closeSettings();
+          }}
+        >
+          <DialogSurface className="settings-dialog">
+            <DialogBody>
+              <DialogTitle>Cài đặt</DialogTitle>
+              <DialogContent className="settings-content">
+                <div className="settings-field">
+                  <label>Phím tắt mở Clipboard</label>
+                  <p>Nhấn tổ hợp phím mới vào ô bên dưới.</p>
+                  <Input
+                    value={shortcut}
+                    readOnly
+                    autoFocus
+                    onKeyDown={captureShortcut}
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                  {shortcutError && (
+                    <span className="settings-error">{shortcutError}</span>
+                  )}
+                </div>
+
+                <Switch
+                  checked={autostartEnabled}
+                  label="Chạy ứng dụng khi khởi động Windows"
+                  onChange={(_, data) => updateAutostart(Boolean(data.checked))}
+                />
+                {settingsError && (
+                  <span className="settings-error">{settingsError}</span>
+                )}
+                <div className="settings-dialog-actions">
+                  <Button appearance="subtle" onClick={closeSettings}>
+                    Hủy
+                  </Button>
+                  <Button appearance="primary" onClick={saveShortcut}>
+                    Lưu
+                  </Button>
+                </div>
+              </DialogContent>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       </main>
     </FluentProvider>
   );
