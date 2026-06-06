@@ -67,6 +67,7 @@ function App() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reviewingClip, setReviewingClip] = useState<Clip | null>(null);
   const [shortcut, setShortcut] = useState("Ctrl+Shift+V");
   const [shortcutError, setShortcutError] = useState("");
   const [settingsError, setSettingsError] = useState("");
@@ -155,6 +156,10 @@ function App() {
   useEffect(() => {
     const onKeyDown = async (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (reviewingClip) {
+          setReviewingClip(null);
+          return;
+        }
         if (settingsOpen) {
           await closeSettings();
           return;
@@ -163,6 +168,7 @@ function App() {
         return;
       }
       if (settingsOpen) return;
+      if (reviewingClip) return;
       if (event.target instanceof HTMLInputElement) return;
 
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -193,7 +199,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [filteredClips, selectedIndex, settingsOpen]);
+  }, [filteredClips, reviewingClip, selectedIndex, settingsOpen]);
 
   const openSettings = () => {
     setSettingsOpen(true);
@@ -316,7 +322,7 @@ function App() {
               className={`clip-row ${selectedIndex === index ? "selected" : ""}`}
               key={clip.id}
               onClick={() => setSelectedIndex(index)}
-              onDoubleClick={() => copyClip(clip)}
+              onDoubleClick={() => setReviewingClip(clip)}
             >
               <div className={`type-icon ${clip.clipType}`}>
                 <TypeIcon type={clip.clipType} />
@@ -360,6 +366,29 @@ function App() {
             </div>
           )}
         </section>
+
+        <Dialog
+          open={Boolean(reviewingClip)}
+          onOpenChange={(_, data) => {
+            if (!data.open) setReviewingClip(null);
+          }}
+        >
+          <DialogSurface className="review-dialog">
+            <DialogBody>
+              <DialogContent className="review-content">
+                {reviewingClip?.image ? (
+                  <img
+                    className="review-image"
+                    src={reviewingClip.image}
+                    alt={reviewingClip.content}
+                  />
+                ) : (
+                  <pre className="review-text">{reviewingClip?.content}</pre>
+                )}
+              </DialogContent>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
 
         <Dialog
           open={settingsOpen}

@@ -286,6 +286,62 @@ button {
   max-width: 360px;
 }
 
+.review-dialog {
+  width: calc(100vw - 16px);
+  max-width: 620px;
+  padding: 8px;
+}
+
+.review-dialog .fui-DialogBody,
+.review-dialog .fui-DialogContent {
+  row-gap: 0;
+  padding: 0;
+}
+
+.review-content {
+  display: grid;
+  gap: 0;
+}
+
+.review-text {
+  max-height: min(72vh, 520px);
+  margin: 0;
+  padding: 7px;
+  overflow: auto;
+  scrollbar-color: var(--colorNeutralStroke1) transparent;
+  scrollbar-width: thin;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
+  color: var(--colorNeutralForeground1);
+  font: 12px/1.45 Consolas, "Cascadia Code", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--colorNeutralBackground2);
+}
+
+.review-text::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+.review-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.review-text::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--colorNeutralStroke1);
+}
+
+.review-image {
+  max-width: 100%;
+  max-height: min(72vh, 520px);
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 6px;
+  object-fit: contain;
+  background: var(--colorNeutralBackground2);
+}
+
 .settings-content {
   display: grid;
   gap: 16px;
