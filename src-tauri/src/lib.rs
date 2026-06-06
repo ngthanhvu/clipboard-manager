@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    env,
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -25,6 +26,7 @@ const HISTORY_EVENT: &str = "clipboard-history-updated";
 const MANAGER_SHOWN_EVENT: &str = "manager-shown";
 const SETTINGS_OPENED_EVENT: &str = "settings-opened";
 const DEFAULT_SHORTCUT: &str = "Ctrl+Shift+V";
+const START_MINIMIZED_ARG: &str = "--hidden";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +117,10 @@ fn show_manager(app: &AppHandle, open_settings: bool) {
             (),
         );
     }
+}
+
+fn is_start_minimized_launch() -> bool {
+    env::args().any(|arg| arg == START_MINIMIZED_ARG)
 }
 
 fn trim_history(history: &mut Vec<Clip>) {
@@ -391,7 +397,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![START_MINIMIZED_ARG]),
         ))
         .plugin(
             ShortcutBuilder::new()
@@ -470,6 +476,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            if !is_start_minimized_launch() {
+                show_manager(app.handle(), false);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

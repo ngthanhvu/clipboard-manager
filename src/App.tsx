@@ -27,8 +27,6 @@ import {
   PinRegular,
   SearchRegular,
   SettingsRegular,
-  WeatherMoonRegular,
-  WeatherSunnyRegular,
 } from "@fluentui/react-icons";
 import "./App.css";
 
@@ -52,13 +50,6 @@ const filters: { value: Filter; label: string }[] = [
   { value: "image", label: "Hình ảnh" },
 ];
 
-const typeLabel: Record<ClipType, string> = {
-  text: "Văn bản",
-  link: "Liên kết",
-  code: "Mã nguồn",
-  image: "Hình ảnh",
-};
-
 function TypeIcon({ type }: { type: ClipType }) {
   if (type === "link") return <LinkRegular />;
   if (type === "code") return <CodeRegular />;
@@ -66,20 +57,10 @@ function TypeIcon({ type }: { type: ClipType }) {
   return <ClipboardRegular />;
 }
 
-function relativeTime(timestamp: number) {
-  const minutes = Math.floor(Math.max(0, Date.now() - timestamp) / 60_000);
-  if (minutes < 1) return "Vừa xong";
-  if (minutes < 60) return `${minutes} phút trước`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-  }).format(timestamp);
-}
-
 function App() {
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() =>
+    window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
   const [clips, setClips] = useState<Clip[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -97,6 +78,13 @@ function App() {
   };
 
   useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateTheme = (event: MediaQueryListEvent) => {
+      setDarkMode(event.matches);
+    };
+    setDarkMode(media.matches);
+    media.addEventListener("change", updateTheme);
+
     invoke<Clip[]>("get_history").then(setClips).catch(console.error);
     refreshSettings().catch(console.error);
 
@@ -120,6 +108,7 @@ function App() {
       void unlistenHistory.then((dispose) => dispose());
       void unlistenShown.then((dispose) => dispose());
       void unlistenSettings.then((dispose) => dispose());
+      media.removeEventListener("change", updateTheme);
     };
   }, []);
 
@@ -188,8 +177,13 @@ function App() {
         return;
       }
 
-      const clip =
-        event.key === "Enter" ? filteredClips[selectedIndex] : undefined;
+      const shouldCopySelected =
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        event.key.toLocaleLowerCase() === "c";
+      const clip = shouldCopySelected ? filteredClips[selectedIndex] : undefined;
       if (clip) {
         event.preventDefault();
         await copyClip(clip);
@@ -259,7 +253,7 @@ function App() {
         <header className="header">
           <div>
             <h1>Clipboard</h1>
-            <span>{shortcut} · ↑↓ chọn · Enter copy</span>
+            <span>{shortcut} · ↑↓ chọn · Ctrl+C copy</span>
           </div>
           <div className="header-actions">
             <Tooltip content="Xóa mục chưa ghim" relationship="label">
@@ -270,14 +264,6 @@ function App() {
                 onClick={async () =>
                   setClips(await invoke<Clip[]>("clear_unpinned"))
                 }
-              />
-            </Tooltip>
-            <Tooltip content="Đổi giao diện" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={darkMode ? <WeatherSunnyRegular /> : <WeatherMoonRegular />}
-                onClick={() => setDarkMode((value) => !value)}
               />
             </Tooltip>
             <Tooltip content="Cài đặt" relationship="label">
@@ -332,19 +318,12 @@ function App() {
               onClick={() => setSelectedIndex(index)}
               onDoubleClick={() => copyClip(clip)}
             >
-              {clip.image ? (
-                <img className="preview" src={clip.image} alt={clip.content} />
-              ) : (
-                <div className={`type-icon ${clip.clipType}`}>
-                  <TypeIcon type={clip.clipType} />
-                </div>
-              )}
+              <div className={`type-icon ${clip.clipType}`}>
+                <TypeIcon type={clip.clipType} />
+              </div>
 
               <div className="clip-content">
                 <p>{clip.content || "Hình ảnh từ clipboard"}</p>
-                <span>
-                  {typeLabel[clip.clipType]} · {relativeTime(clip.createdAt)}
-                </span>
               </div>
 
               <div className="row-actions">
