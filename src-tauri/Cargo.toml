@@ -27,3 +27,4 @@ base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2.0.0"

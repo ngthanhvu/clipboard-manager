@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
 import {
   Button,
   Dialog,
@@ -28,10 +29,12 @@ import {
   SearchRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
+import packageInfo from "../package.json";
 import "./App.css";
 
 type ClipType = "text" | "link" | "code" | "image";
 type Filter = "all" | "pinned" | ClipType;
+type SettingsTab = "general" | "updates";
 
 type Clip = {
   id: number;
@@ -42,6 +45,10 @@ type Clip = {
   pinned: boolean;
   image?: string;
 };
+
+type UpdateState = "idle" | "checking" | "available" | "downloading" | "installed";
+
+const appVersion = packageInfo.version;
 
 const filters: { value: Filter; label: string }[] = [
   { value: "all", label: "Tất cả" },
@@ -67,11 +74,16 @@ function App() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [reviewingClip, setReviewingClip] = useState<Clip | null>(null);
   const [shortcut, setShortcut] = useState("Ctrl+Shift+V");
   const [shortcutError, setShortcutError] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>("idle");
+  const [updateMessage, setUpdateMessage] = useState("");
+  const [updateVersion, setUpdateVersion] = useState("");
+  const [updateProgress, setUpdateProgress] = useState(0);
 
   const refreshSettings = async () => {
     setShortcut(await invoke<string>("get_shortcut"));
@@ -100,8 +112,10 @@ function App() {
     });
     const unlistenSettings = listen("settings-opened", () => {
       setSettingsOpen(true);
+      setSettingsTab("general");
       setShortcutError("");
       setSettingsError("");
+      resetUpdateStatus();
       refreshSettings().catch(console.error);
     });
 
@@ -203,8 +217,10 @@ function App() {
 
   const openSettings = () => {
     setSettingsOpen(true);
+    setSettingsTab("general");
     setShortcutError("");
     setSettingsError("");
+    resetUpdateStatus();
     refreshSettings().catch(console.error);
   };
 
@@ -213,6 +229,14 @@ function App() {
     setSettingsOpen(false);
     setShortcutError("");
     setSettingsError("");
+    resetUpdateStatus();
+  };
+
+  const resetUpdateStatus = () => {
+    setUpdateState("idle");
+    setUpdateMessage("");
+    setUpdateVersion("");
+    setUpdateProgress(0);
   };
 
   const captureShortcut = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -250,6 +274,51 @@ function App() {
     } catch (error) {
       setAutostartEnabled(previous);
       setSettingsError(String(error));
+    }
+  };
+
+  const installUpdate = async () => {
+    setUpdateState("checking");
+    setUpdateMessage("Đang kiểm tra cập nhật...");
+    setUpdateVersion("");
+    setUpdateProgress(0);
+
+    try {
+      const update = await check();
+      if (!update) {
+        setUpdateState("idle");
+        setUpdateMessage("Bạn đang dùng phiên bản mới nhất.");
+        return;
+      }
+
+      setUpdateState("available");
+      setUpdateVersion(update.version);
+      setUpdateMessage(`Có phiên bản ${update.version}. Đang tải...`);
+
+      let downloaded = 0;
+      let contentLength = 0;
+      setUpdateState("downloading");
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          contentLength = event.data.contentLength ?? 0;
+          setUpdateProgress(0);
+        }
+        if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          if (contentLength > 0) {
+            setUpdateProgress(Math.round((downloaded / contentLength) * 100));
+          }
+        }
+        if (event.event === "Finished") {
+          setUpdateProgress(100);
+        }
+      });
+
+      setUpdateState("installed");
+      setUpdateMessage("Đã cài cập nhật. Hãy thoát và mở lại ứng dụng để dùng phiên bản mới.");
+    } catch (error) {
+      setUpdateState("idle");
+      setUpdateMessage(String(error));
     }
   };
 
@@ -400,6 +469,26 @@ function App() {
             <DialogBody>
               <DialogTitle>Cài đặt</DialogTitle>
               <DialogContent className="settings-content">
+                <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+                  <button
+                    className={settingsTab === "general" ? "active" : ""}
+                    role="tab"
+                    aria-selected={settingsTab === "general"}
+                    onClick={() => setSettingsTab("general")}
+                  >
+                    Chung
+                  </button>
+                  <button
+                    className={settingsTab === "updates" ? "active" : ""}
+                    role="tab"
+                    aria-selected={settingsTab === "updates"}
+                    onClick={() => setSettingsTab("updates")}
+                  >
+                    Cập nhật
+                  </button>
+                </div>
+                {settingsTab === "general" && (
+                  <div className="settings-panel" role="tabpanel">
                 <div className="settings-field">
                   <label>Phím tắt mở Clipboard</label>
                   <p>Nhấn tổ hợp phím mới vào ô bên dưới.</p>
@@ -423,13 +512,64 @@ function App() {
                 {settingsError && (
                   <span className="settings-error">{settingsError}</span>
                 )}
+                  </div>
+                )}
+                {settingsTab === "updates" && (
+                  <div className="settings-panel" role="tabpanel">
+                <div className="settings-field update-field">
+                  <label>Cập nhật ứng dụng</label>
+                  <p>Kiểm tra, tải và cài đặt bản phát hành mới nhất.</p>
+                  <span className="app-version">Phiên bản hiện tại: v{appVersion}</span>
+                  <div className="update-actions">
+                    <Button
+                      className="update-check-button"
+                      appearance="secondary"
+                      disabled={updateState === "checking" || updateState === "downloading"}
+                      onClick={installUpdate}
+                    >
+                      {updateState === "checking"
+                        ? "Đang kiểm tra..."
+                        : updateState === "downloading"
+                          ? "Đang tải..."
+                          : "Kiểm tra cập nhật"}
+                    </Button>
+                    {updateVersion && <span>v{updateVersion}</span>}
+                  </div>
+                  {updateState === "downloading" && (
+                    <div className="update-progress">
+                      <span style={{ width: `${updateProgress}%` }} />
+                    </div>
+                  )}
+                  {updateMessage && (
+                    <span
+                      className={
+                        updateState === "installed" ||
+                        updateMessage.includes("phiên bản mới nhất")
+                          ? "settings-success"
+                          : "settings-error"
+                      }
+                    >
+                      {updateMessage}
+                    </span>
+                  )}
+                </div>
+                  </div>
+                )}
                 <div className="settings-dialog-actions">
-                  <Button appearance="subtle" onClick={closeSettings}>
-                    Hủy
-                  </Button>
-                  <Button appearance="primary" onClick={saveShortcut}>
-                    Lưu
-                  </Button>
+                  {settingsTab === "general" ? (
+                    <>
+                      <Button appearance="subtle" onClick={closeSettings}>
+                        Hủy
+                      </Button>
+                      <Button appearance="primary" onClick={saveShortcut}>
+                        Lưu
+                      </Button>
+                    </>
+                  ) : (
+                    <Button appearance="primary" onClick={closeSettings}>
+                      Đóng
+                    </Button>
+                  )}
                 </div>
               </DialogContent>
             </DialogBody>

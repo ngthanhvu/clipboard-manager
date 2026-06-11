@@ -399,6 +399,7 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec![START_MINIMIZED_ARG]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             ShortcutBuilder::new()
                 .with_handler(|app, _, event| {
