@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:nsis": "powershell -ExecutionPolicy Bypass -File scripts/build-release-nsis.ps1",
+    "release:latest-json": "powershell -ExecutionPolicy Bypass -File scripts/create-latest-json.ps1"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.74.1",
